@@ -1,0 +1,27 @@
+# Deep Learning
+torch>=2.0.0
+torchvision>=0.15.0
+
+# Data Processing
+numpy>=1.23.0
+pandas>=1.5.0
+scikit-learn>=1.3.0
+
+# Image Processing & Medical Imaging
+opencv-python>=4.8.0
+pydicom>=3.0.0
+Pillow>=10.0.0
+
+# Data Augmentation
+albumentations>=1.3.0
+
+# Ensemble & NMS
+ensemble-boxes>=1.0.9
+
+# Visualization
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Utilities
+tqdm>=4.65.0
+PyYAML>=6.0

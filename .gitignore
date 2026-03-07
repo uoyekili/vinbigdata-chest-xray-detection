@@ -1,0 +1,36 @@
+# Data
+/data/train_dicom/
+/data/test_dicom/
+/data/train_png/
+/data/test_png/
+
+# Output
+/output/
+
+# Checkpoints
+/checkpoints/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+*.pem
+
+# Logs
+*.log
