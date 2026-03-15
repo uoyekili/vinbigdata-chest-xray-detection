@@ -7,8 +7,8 @@
 # Output
 /output/
 
-# Checkpoints
-/checkpoints/
+# Jupyter Notebooks
+/notebooks/
 
 # Python
 __pycache__/

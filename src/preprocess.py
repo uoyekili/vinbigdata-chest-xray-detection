@@ -11,16 +11,13 @@ from sklearn.model_selection import GroupShuffleSplit
 from tqdm import tqdm
 
 from src import config
+from src.logger import get_logger
 
 
 def read_dicom_header(dcm_path):
     try:
         dcm = pydicom.dcmread(str(dcm_path), stop_before_pixels=True)
-        return {
-            "image_id": dcm_path.stem,
-            "width": dcm.Columns,
-            "height": dcm.Rows
-        }
+        return {"image_id": dcm_path.stem, "width": dcm.Columns, "height": dcm.Rows}
     except Exception:
         return None
 
@@ -28,8 +25,14 @@ def read_dicom_header(dcm_path):
 def get_dicom_metadata_parallel(dicom_dir: str) -> pd.DataFrame:
     dicom_files = list(Path(dicom_dir).glob("*.dicom"))
     with ProcessPoolExecutor() as executor:
-        results = list(tqdm(executor.map(read_dicom_header, dicom_files), total=len(dicom_files), desc="Extracting metadata"))
-    
+        results = list(
+            tqdm(
+                executor.map(read_dicom_header, dicom_files),
+                total=len(dicom_files),
+                desc="Extracting metadata",
+            )
+        )
+
     results = [r for r in results if r is not None]
     return pd.DataFrame(results)
 
@@ -38,7 +41,7 @@ def process_single_dicom(args):
     """Process a single DICOM file (for parallel execution)."""
     dcm_path, output_dir, image_size = args
     out_path = os.path.join(output_dir, dcm_path.stem + ".png")
-    
+
     # Skip if already exists
     if os.path.exists(out_path):
         return
@@ -59,31 +62,48 @@ def process_single_dicom(args):
 
 def convert_dicom_to_png(dicom_dir: str, output_dir: str, image_size: int = 1024):
     """Convert DICOM images to PNG format using multiprocessing."""
+    logger = get_logger()
+
     os.makedirs(output_dir, exist_ok=True)
     dicom_files = list(Path(dicom_dir).glob("*.dicom"))
-    
-    print(f"Converting {len(dicom_files)} DICOM files (Parallel)...")
-    
+
+    if not dicom_files:
+        logger.error(f"No DICOM files found in {dicom_dir}")
+        return 0
+
+    logger.info(f"Converting {len(dicom_files)} DICOM files ...")
+
     args_list = [(dcm_path, output_dir, image_size) for dcm_path in dicom_files]
-    
+
     # Use ProcessPoolExecutor for CPU-bound tasks
-    # Max workers = number of CPU cores
     with ProcessPoolExecutor() as executor:
-        list(tqdm(executor.map(process_single_dicom, args_list), total=len(args_list)))
+        list(
+            tqdm(
+                executor.map(process_single_dicom, args_list),
+                total=len(args_list),
+                desc="Converting DICOMs",
+            )
+        )
 
-    print(f"Saved images to {output_dir}")
-
+    png_count = len(list(Path(output_dir).glob("*.png")))
+    logger.info(f"✓ Converted {png_count} images to PNG in {output_dir}")
 
 
 def merge_radiologist_annotations(
-    df: pd.DataFrame,
-    target_size: int = 1024
+    df: pd.DataFrame, target_size: int = 1024
 ) -> pd.DataFrame:
     """Merge overlapping bounding boxes from multiple radiologists using WBF."""
+    logger = get_logger()
+
     results = []
 
     # Filter out "No finding" (class_id = 14)
-    df_with_box = df[df["class_id"] != 14].copy()
+    df_original = len(df)
+    df_with_box = df[df["class_id"] < 14].copy()
+    removed = df_original - len(df_with_box)
+
+    if removed > 0:
+        logger.info(f"Removed {removed} 'No finding' annotations")
 
     for image_id, group in tqdm(
         df_with_box.groupby("image_id"), desc="Merging annotations"
@@ -121,87 +141,88 @@ def merge_radiologist_annotations(
                     "y_max": box[3] * target_size,
                     "confidence": score,
                     "width": target_size,
-                    "height": target_size
+                    "height": target_size,
                 }
             )
 
-    return pd.DataFrame(results)
+    df_merged = pd.DataFrame(results)
+    logger.info(
+        f"✓ Merged annotations: {len(df_with_box)} rows → {len(df_merged)} rows"
+    )
+    return df_merged
 
 
 def split_local_test(df_merged: pd.DataFrame, test_ratio: float = 0.1):
-    """Split 10% data for local testing (hold-out set)."""
-    print(f"\nSplitting {test_ratio*100}% for local test (hold-out)...")
-    
+    """Split 10% data for local testing."""
+    logger = get_logger()
+    logger.info(f"Splitting {test_ratio*100}% for local test...")
+
     # Split based on image_id to avoid leakage
-    splitter = GroupShuffleSplit(n_splits=1, test_size=test_ratio, random_state=42)
+    splitter = GroupShuffleSplit(
+        n_splits=1, test_size=test_ratio, random_state=config.RANDOM_SEED
+    )
     train_idx, test_idx = next(splitter.split(df_merged, groups=df_merged["image_id"]))
-    
+
     df_local_train = df_merged.iloc[train_idx]
     df_local_test = df_merged.iloc[test_idx]
-        
-    print(f"Local Train/Val set: {len(df_local_train)} annotations ({df_local_train['image_id'].nunique()} images)")
-    print(f"Local Test set:      {len(df_local_test)} annotations ({df_local_test['image_id'].nunique()} images)")
-    
-    return df_local_train, df_local_test
 
+    logger.info(
+        f"Local Train set: {len(df_local_train)} annotations ({df_local_train['image_id'].nunique()} images)"
+    )
+    logger.info(
+        f"Local Test set:  {len(df_local_test)} annotations ({df_local_test['image_id'].nunique()} images)"
+    )
+
+    return df_local_train, df_local_test
 
 
 def preprocess_pipeline(
     csv_path: str,
     dicom_dir: str,
-    output_dir: str,
 ):
-    """Run preprocessing: Merge annotations -> Split Train/Local Test."""
-    print("Extracting metadata from DICOMs...")
-    meta_df = get_dicom_metadata_parallel(dicom_dir)
-    
-    print(f"Reading {csv_path}...")
+    """Run preprocessing: Convert DICOM → Merge annotations → Split Train/Test."""
+    logger = get_logger()
+
+    logger.info("=" * 70)
+    logger.info("PREPROCESSING PIPELINE")
+    logger.info("=" * 70)
+
+    # Step 1: Convert DICOM to PNG
+    logger.info(f"Step 1: Convert DICOM from {dicom_dir}")
+
+    convert_dicom_to_png(dicom_dir, config.DATASET_DIR, config.IMAGE_SIZE)
+
+    # Step 2: Read CSV and merge metadata
+    logger.info(f"Step 2: Reading {csv_path}")
+    if not os.path.exists(csv_path):
+        logger.error(f"CSV not found: {csv_path}")
+        return False
+
     df = pd.read_csv(csv_path)
-    
-    # Merge metadata
+    logger.info(
+        f"Loaded {len(df)} annotations from {len(df['image_id'].unique())} images"
+    )
+
+    # Step 3: Extract DICOM metadata
+    logger.info("Step 3: Extracting DICOM metadata...")
+    meta_df = get_dicom_metadata_parallel(dicom_dir)
     df = df.merge(meta_df, on="image_id", how="left")
-    
-    # Check if we have width/height for all images
-    if df["width"].isnull().any():
-        print("Warning: Some images are missing metadata. Using defaults (1024x1024).")
-        df["width"] = df["width"].fillna(1024)
-        df["height"] = df["height"].fillna(1024)
 
-    print("Merging annotations from multiple radiologists...")
-    df_merged = merge_radiologist_annotations(df)
-    
-    # Split Local Test (10%)
-    df_local_train, df_local_test = split_local_test(df_merged)
+    # Fill missing dimensions
+    df["width"] = df["width"].fillna(config.IMAGE_SIZE)
+    df["height"] = df["height"].fillna(config.IMAGE_SIZE)
 
-    # Save files
-    local_train_path = os.path.join(output_dir, "local_train.csv")
-    local_test_path = os.path.join(output_dir, "local_test.csv")
-    
-    df_local_train.to_csv(local_train_path, index=False)
-    df_local_test.to_csv(local_test_path, index=False)
-    
-    print(f"Saved local train to {local_train_path}")
-    print(f"Saved local test to {local_test_path}")
+    # Step 4: Merge radiologist annotations
+    logger.info("Step 4: Merging annotations from multiple radiologists...")
+    df_merged = merge_radiologist_annotations(df, config.IMAGE_SIZE)
 
+    # Step 5: Save preprocessed data
+    logger.info("Step 5: Saving preprocessed data...")
+    df_merged.to_csv(config.PREPROCESSED_CSV, index=False)
+    logger.info(f"Saved to {config.PREPROCESSED_CSV}")
 
-if __name__ == "__main__":
-    os.makedirs(config.DATA_DIR, exist_ok=True)
-    
-    # Process Train Data
-    if os.path.exists(config.RAW_TRAIN_DICOM_DIR):
-        print("Processing Train DICOM...")
-        convert_dicom_to_png(config.RAW_TRAIN_DICOM_DIR, config.TRAIN_PNG_DIR, image_size=1024)
-    
-    # Process Test Data
-    if os.path.exists(config.RAW_TEST_DICOM_DIR):
-        print("Processing Test DICOM...")
-        convert_dicom_to_png(config.RAW_TEST_DICOM_DIR, config.TEST_PNG_DIR, image_size=1024)
-    
-    if os.path.exists(config.RAW_TRAIN_CSV):
-        preprocess_pipeline(
-            csv_path=config.RAW_TRAIN_CSV,
-            dicom_dir=config.RAW_TRAIN_DICOM_DIR,
-            output_dir=config.DATA_DIR,
-        )
-    
-    print("Preprocessing completed!")
+    logger.info("=" * 70)
+    logger.info("✓ PREPROCESSING COMPLETE")
+    logger.info("=" * 70)
+
+    return True
