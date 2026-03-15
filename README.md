@@ -16,10 +16,10 @@ vinbigdata-chest-xray-detection/
 │   └── train_png/                 # Converted PNG images
 │
 ├── src/
-│   ├── preprocess.py              # DICOM→PNG, merge annotations
+│   ├── preprocess.py              # DICOM → PNG, merge annotations
 │   ├── split.py                   # Dataset train/val/test split
 │   ├── dataset.py                 # VinBigDataset class
-│   ├── model.py                   # Model builders (4 variants)
+│   ├── model.py                   # Model builders
 │   ├── training.py                # Training loop with AMP
 │   ├── evaluation.py              # Evaluation, metrics, visualization
 │   ├── ensemble.py                # WBF integration
@@ -40,7 +40,7 @@ vinbigdata-chest-xray-detection/
 ├── notebooks/
 │   └── analysis.ipynb             # Data analysis notebook
 │
-├── main.py                        # Entry point (preprocess → train → eval)
+├── main.py                        # Entry point
 ├── requirements.txt               # Dependencies
 └── README.md                      # Full documentation
 ```
@@ -55,7 +55,7 @@ output/
         └── {timestamp}/      (YYYY-MM-DD_HH-MM)
             ├── config/       (eval_config.json, model_list.json)
             ├── metrics/      (confusion_matrix.png, metrics_summary.json, etc.)
-            ├── cases/        ({image_id}/ → visualization.png + metadata.json)
+            ├── cases/        ({image_id}/ → {image_id}.png + metadata.json)
             └── logs/         (evaluation.log)
 ```
 
