@@ -1,8 +1,5 @@
 # Data
-/data/train_dicom/
-/data/test_dicom/
-/data/train_png/
-/data/test_png/
+/data/
 
 # Output
 /output/
