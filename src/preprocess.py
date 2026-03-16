@@ -86,7 +86,7 @@ def convert_dicom_to_png(dicom_dir: str, output_dir: str, image_size: int = 1024
         )
 
     png_count = len(list(Path(output_dir).glob("*.png")))
-    logger.info(f"✓ Converted {png_count} images to PNG in {output_dir}")
+    logger.info(f"Converted {png_count} images to PNG in {output_dir}")
 
 
 def merge_radiologist_annotations(
@@ -146,9 +146,7 @@ def merge_radiologist_annotations(
             )
 
     df_merged = pd.DataFrame(results)
-    logger.info(
-        f"✓ Merged annotations: {len(df_with_box)} rows → {len(df_merged)} rows"
-    )
+    logger.info(f"Merged annotations: {len(df_with_box)} rows → {len(df_merged)} rows")
     return df_merged
 
 
@@ -222,7 +220,7 @@ def preprocess_pipeline(
     logger.info(f"Saved to {config.PREPROCESSED_CSV}")
 
     logger.info("=" * 70)
-    logger.info("✓ PREPROCESSING COMPLETE")
+    logger.info("PREPROCESSING COMPLETE")
     logger.info("=" * 70)
 
     return True

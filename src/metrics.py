@@ -100,22 +100,3 @@ def compute_map(predictions, targets, iou_threshold=0.4):
         aps.append(ap)
 
     return np.mean(aps) if aps else 0.0
-
-
-def compute_map_range(
-    predictions: list[dict],
-    targets: list[dict],
-    iou_thresholds: list[float] = None,
-) -> dict[str, float]:
-    if iou_thresholds is None:
-        iou_thresholds = [0.4, 0.5, 0.75]
-
-    results = {}
-    for iou_thr in iou_thresholds:
-        mAP = compute_map(predictions, targets, iou_threshold=iou_thr)
-        results[f"mAP@{iou_thr}"] = mAP
-
-    # Average mAP
-    results["mAP_avg"] = np.mean(list(results.values()))
-
-    return results

@@ -53,4 +53,4 @@ def split_dataset(preprocessed_csv, output_dir):
     logger.info(f"Train: {len(df_train)} annotations ({len(train_imgs)} images)")
     logger.info(f"Val: {len(df_val)} annotations ({len(val_imgs)} images)")
     logger.info(f"Test: {len(df_test)} annotations ({len(test_imgs)} images)")
-    logger.info(f"✓ Split CSVs saved to {output_dir}")
+    logger.info(f"Split CSVs saved to {output_dir}")

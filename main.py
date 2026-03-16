@@ -48,7 +48,13 @@ def main():
         nargs="+",
         choices=config.AVAILABLE_MODELS,
         default=config.AVAILABLE_MODELS,
-        help="Models to evaluate (e.g., fasterrcnn retinanet_v2; default: all)",
+        help="Models to evaluate (e.g., fasterrcnn retinanetv2; default: all)",
+    )
+    eval_parser.add_argument(
+        "--conf_threshold",
+        type=float,
+        default=config.EVAL_CONF_THRESHOLD,
+        help="Confidence threshold for predictions",
     )
 
     args = parser.parse_args()
@@ -71,30 +77,32 @@ def main():
     elif args.command == "split":
         split_dataset(config.PREPROCESSED_CSV, config.DATA_DIR)
     elif args.command == "train":
-        logger.info(f"Training {args.model.upper()}")
         train(args.model, config.TRAIN_CSV, config.VAL_CSV, config.PNG_DIR)
     elif args.command == "eval":
-        logger.info(f"Evaluating models: {', '.join(args.models)}")
-        run_eval(args.models)
+        run_eval(
+            args.models,
+            conf_threshold=args.conf_threshold,
+        )
     else:
         parser.print_help()
 
 
-def run_eval(user_model_list):
+def run_eval(
+    user_model_list,
+    conf_threshold = None,
+):
     logger = get_logger()
     device = config.DEVICE
-
-    if not os.path.exists(config.TEST_CSV):
-        logger.error(f"Test CSV not found: {config.TEST_CSV}")
-        logger.info("Run 'python main.py split' first")
-        return
 
     # model_list uses same names as AVAILABLE_MODELS
     model_list = user_model_list
 
+    if conf_threshold is None:
+        conf_threshold = config.EVAL_CONF_THRESHOLD
+
     logger.info(f"Loading test data from {config.TEST_CSV}")
     df_test = pd.read_csv(config.TEST_CSV)
-    test_ds = VinBigDataset(df_test, config.PNG_DIR, get_val_transforms(), is_test=True)
+    test_ds = VinBigDataset(df_test, config.PNG_DIR, get_val_transforms())
     test_loader = DataLoader(
         test_ds,
         batch_size=config.BATCH_SIZE,
@@ -117,12 +125,14 @@ def run_eval(user_model_list):
 
     config_dir = os.path.join(eval_base_dir, "config")
     metrics_dir = os.path.join(eval_base_dir, "metrics")
-    cases_dir = os.path.join(eval_base_dir, "cases")
+    images_dir = os.path.join(eval_base_dir, "images")
+    metadatas_dir = os.path.join(eval_base_dir, "metadatas")
     logs_dir = os.path.join(eval_base_dir, "logs")
 
     os.makedirs(config_dir, exist_ok=True)
     os.makedirs(metrics_dir, exist_ok=True)
-    os.makedirs(cases_dir, exist_ok=True)
+    os.makedirs(images_dir, exist_ok=True)
+    os.makedirs(metadatas_dir, exist_ok=True)
     os.makedirs(logs_dir, exist_ok=True)
 
     # Setup logging to file
@@ -133,6 +143,7 @@ def run_eval(user_model_list):
     logger.info("=" * 70)
     logger.info(f"Evaluation Start: {timestamp}")
     logger.info(f"Models: {', '.join(user_model_list)}")
+    logger.info(f"Conf Threshold: {conf_threshold}")
     logger.info(f"Output: {eval_base_dir}")
     logger.info("=" * 70)
 
@@ -142,7 +153,8 @@ def run_eval(user_model_list):
         "models": user_model_list,
         "internal_models": model_list,
         "num_models": len(model_list),
-        "conf_threshold": config.EVAL_CONF_THRESHOLD,
+        "conf_threshold": conf_threshold,
+        "iou_threshold": config.IOU_THRESHOLD,
         "wbf_iou_thr": config.WBF_IOU_THR,
         "wbf_skip_box_thr": config.WBF_SKIP_BOX_THR,
         "image_size": config.IMAGE_SIZE,
@@ -166,19 +178,19 @@ def run_eval(user_model_list):
 
     # Run ensemble evaluation
     logger.info(f"Ensemble with {len(model_list)} models: {', '.join(model_list)}")
-    all_predictions, image_ids = ensemble_predict(model_list, test_loader, device)
+    all_predictions, image_ids = ensemble_predict(model_list, test_loader, device, conf_threshold)
     all_targets = get_targets(test_loader)
 
     # Evaluate with new structure
     evaluate(
-        all_predictions,
-        all_targets,
-        eval_base_dir,
-        cases_dir,
-        metrics_dir,
-        image_ids,
-        df_test,
-        config.PNG_DIR,
+        predictions_list=all_predictions,
+        targets_list=all_targets,
+        images_dir=images_dir,
+        metadatas_dir=metadatas_dir,
+        metrics_dir=metrics_dir,
+        image_ids=image_ids,
+        dataset_dir=config.PNG_DIR,
+        iou_threshold=config.IOU_THRESHOLD,
     )
 
     logger.info("=" * 70)
@@ -207,7 +219,7 @@ def get_targets(data_loader):
     return targets
 
 
-def ensemble_predict(model_list, data_loader, device):
+def ensemble_predict(model_list, data_loader, device, conf_threshold):
     logger = get_logger()
 
     # Load selected models for ensemble
@@ -245,7 +257,7 @@ def ensemble_predict(model_list, data_loader, device):
                     boxes = output["boxes"].cpu().numpy()
                     scores = output["scores"].cpu().numpy()
                     labels = output["labels"].cpu().numpy()
-                    mask = scores >= config.EVAL_CONF_THRESHOLD
+                    mask = scores >= conf_threshold
 
                     batch_all_boxes[i].append(boxes[mask])
                     batch_all_scores[i].append(scores[mask])

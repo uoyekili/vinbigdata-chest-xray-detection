@@ -101,7 +101,7 @@ def validate(model, data_loader, device):
                 }
             )
 
-    return compute_map(all_predictions, all_targets, iou_threshold=0.4)
+    return compute_map(all_predictions, all_targets, iou_threshold=config.IOU_THRESHOLD)
 
 
 def train(model_name: str, train_csv: str, val_csv: str, image_dir: str):
@@ -135,7 +135,7 @@ def train(model_name: str, train_csv: str, val_csv: str, image_dir: str):
     scaler = GradScaler() if config.DEVICE.type == "cuda" else None
     os.makedirs(config.CHECKPOINT_DIR, exist_ok=True)
 
-    checkpoint_path = config.get_checkpoint_path(model_name)
+    checkpoint_path = os.path.join(config.CHECKPOINT_DIR, f"{model_name}.pth")
     best_map = 0.0
     patience_counter = 0
     history = {"train_loss": [], "val_map": [], "lr": []}

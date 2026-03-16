@@ -23,21 +23,22 @@ CLASS_NAMES = [
     "Pulmonary fibrosis",
 ]
 NUM_CLASSES = len(CLASS_NAMES) + 1
-AVAILABLE_MODELS = ["fasterrcnn", "fasterrcnn_v2", "retinanet", "retinanet_v2"]
+AVAILABLE_MODELS = ["fasterrcnn", "fasterrcnnv2", "retinanet", "retinanetv2"]
 
 # Training Hyperparameters
 IMAGE_SIZE = 1024
 BATCH_SIZE = 16
-NUM_EPOCHS = 80
+NUM_EPOCHS = 30
 LEARNING_RATE = 0.001
 WEIGHT_DECAY = 0.0005
-NUM_WORKERS = 30
+NUM_WORKERS = 16
 MAX_GRAD_NORM = 5.0
-PATIENCE = 7
-
-# Inference Thresholds
+PATIENCE = 10
 TRAIN_CONF_THRESHOLD = 0.05
-EVAL_CONF_THRESHOLD = 0.3
+
+# Evaluation Config
+EVAL_CONF_THRESHOLD = 0.6
+IOU_THRESHOLD = 0.4
 
 # Data Paths
 DATA_DIR = "data"
@@ -57,11 +58,11 @@ OUTPUT_DIR = "output"
 CHECKPOINT_DIR = os.path.join(OUTPUT_DIR, "checkpoints")
 
 # Ensemble Parameters
-WBF_IOU_THR = 0.6
+WBF_IOU_THR = 0.4
 WBF_SKIP_BOX_THR = 0.0
 WBF_WEIGHTS = {
     "fasterrcnn": 1.0,
-    "fasterrcnn_v2": 1.0,
+    "fasterrcnnv2": 1.0,
     "retinanet": 1.0,
-    "retinanet_v2": 1.0,
+    "retinanetv2": 1.0,
 }

@@ -45,11 +45,10 @@ def get_val_transforms():
 
 
 class VinBigDataset(Dataset):
-    def __init__(self, df, image_dir, transforms=None, is_test=False):
+    def __init__(self, df, image_dir, transforms=None):
         self.df = df
         self.image_dir = image_dir
         self.transforms = transforms
-        self.is_test = is_test
         self.image_ids = df["image_id"].unique().tolist()
 
     def __len__(self):
@@ -71,7 +70,7 @@ class VinBigDataset(Dataset):
 
         records = self.df[self.df["image_id"] == image_id]
 
-        if len(records) == 0 or self.is_test:
+        if len(records) == 0:
             boxes = np.zeros((0, 4), dtype=np.float32)
             labels = np.zeros((0,), dtype=np.int64)
         else:
@@ -124,9 +123,7 @@ def collate_fn(batch):
 
 def create_dataloaders(train_csv, val_csv, image_dir):
     train_ds = VinBigDataset(pd.read_csv(train_csv), image_dir, get_train_transforms())
-    val_ds = VinBigDataset(
-        pd.read_csv(val_csv), image_dir, get_val_transforms(), is_test=True
-    )
+    val_ds = VinBigDataset(pd.read_csv(val_csv), image_dir, get_val_transforms())
 
     train_loader = DataLoader(
         train_ds,

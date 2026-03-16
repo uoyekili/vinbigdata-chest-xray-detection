@@ -20,7 +20,7 @@ def seed_everything(seed: int = config.RANDOM_SEED):
 def find_trained_models():
     available = []
     for model_name in config.AVAILABLE_MODELS:
-        path = config.get_checkpoint_path(model_name)
+        path = os.path.join(config.CHECKPOINT_DIR, f"{model_name}.pth")
         if os.path.exists(path):
             available.append(model_name)
     return available

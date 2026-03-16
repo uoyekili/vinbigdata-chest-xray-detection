@@ -1,7 +1,6 @@
 import logging
 import os
 import sys
-from datetime import datetime
 from src import config
 
 _logger = None

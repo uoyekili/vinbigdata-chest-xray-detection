@@ -1,6 +1,5 @@
 import os
 import json
-import csv
 import cv2
 import numpy as np
 import pandas as pd
@@ -9,28 +8,6 @@ import seaborn as sns
 
 from src import config
 from src.logger import get_logger
-
-
-def draw_boxes(image, boxes, labels, scores=None, class_names=None):
-    img = image.copy()
-    h, w = image.shape[:2]
-
-    for idx, (box, label) in enumerate(zip(boxes, labels)):
-        x_min, y_min, x_max, y_max = box
-        x_min, y_min = max(0, int(x_min)), max(0, int(y_min))
-        x_max, y_max = min(w, int(x_max)), min(h, int(y_max))
-
-        cv2.rectangle(img, (x_min, y_min), (x_max, y_max), (0, 255, 0), 2)
-
-        text = class_names[int(label) - 1] if class_names else f"Class {label}"
-        if scores is not None:
-            text += f" {scores[idx]:.2f}"
-
-        cv2.putText(
-            img, text, (x_min, y_min - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1
-        )
-
-    return img
 
 
 def compute_iou(box1, box2):
@@ -54,7 +31,7 @@ def compute_iou(box1, box2):
 
 
 def match_predictions(
-    pred_boxes, pred_labels, pred_scores, gt_boxes, gt_labels, iou_threshold=0.5
+    pred_boxes, pred_labels, pred_scores, gt_boxes, gt_labels, iou_threshold
 ):
     tp_idx = []
     fp_idx = []
@@ -89,9 +66,7 @@ def match_predictions(
     return tp_idx, fp_idx, fn_idx
 
 
-def build_confusion_matrix(
-    predictions_list, targets_list, class_names, iou_threshold=0.5
-):
+def build_confusion_matrix(predictions_list, targets_list, class_names, iou_threshold):
     num_classes = len(class_names)
     cm = np.zeros((num_classes + 1, num_classes + 1), dtype=int)
 
@@ -121,34 +96,32 @@ def build_confusion_matrix(
     return cm
 
 
-def plot_confusion_matrix(cm, class_names, output_path):
-    _, ax = plt.subplots(figsize=(12, 10))
-    labels = ["Background"] + class_names
-    sns.heatmap(
-        cm,
-        annot=True,
-        fmt="d",
-        cmap="Blues",
-        xticklabels=labels,
-        yticklabels=labels,
-        ax=ax,
+def _draw_box_on_image(img, box, label, color, y_offset=0):
+    """Helper function to draw a single box on image"""
+    x_min, y_min, x_max, y_max = box
+    h, w = img.shape[:2]
+    x_min = max(0, int(x_min))
+    y_min = max(0, int(y_min))
+    x_max = min(w, int(x_max))
+    y_max = min(h, int(y_max))
+
+    cv2.rectangle(img, (x_min, y_min), (x_max, y_max), color, 2)
+
+    text = (
+        config.CLASS_NAMES[int(label) - 1]
+        if 1 <= int(label) <= len(config.CLASS_NAMES)
+        else f"Class {label}"
     )
-    ax.set_xlabel("Predicted")
-    ax.set_ylabel("Ground Truth")
-    ax.set_title("Confusion Matrix")
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=100, bbox_inches="tight")
-    plt.close()
+    text = f"{text}"
+    cv2.putText(
+        img, text, (x_min, y_min - y_offset), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1
+    )
 
 
-def save_prediction_metadata(case_id, predictions, targets, image_id, output_dir):
-    """Save metadata for a single prediction case as JSON - DEPRECATED"""
-    case_dir = os.path.join(output_dir, f"case_{case_id}")
-    os.makedirs(case_dir, exist_ok=True)
-
+def save_case_metadata(image_id, predictions, targets, metadata_dir):
+    """Save metadata as JSON with image_id filename"""
     metadata = {
         "image_id": str(image_id),
-        "case_id": case_id,
         "ground_truth": {
             "boxes": (
                 targets["boxes"].tolist()
@@ -159,58 +132,6 @@ def save_prediction_metadata(case_id, predictions, targets, image_id, output_dir
                 targets["labels"].tolist()
                 if isinstance(targets["labels"], np.ndarray)
                 else targets["labels"]
-            ),
-            "num_objects": (
-                len(targets["labels"]) if targets["labels"].shape[0] > 0 else 0
-            ),
-        },
-        "predictions": {
-            "boxes": (
-                predictions["boxes"].tolist()
-                if predictions["boxes"].shape[0] > 0
-                else []
-            ),
-            "scores": (
-                predictions["scores"].tolist()
-                if predictions["scores"].shape[0] > 0
-                else []
-            ),
-            "labels": (
-                predictions["labels"].tolist()
-                if predictions["labels"].shape[0] > 0
-                else []
-            ),
-            "num_detections": (
-                len(predictions["labels"]) if predictions["labels"].shape[0] > 0 else 0
-            ),
-        },
-    }
-
-    metadata_path = os.path.join(case_dir, "metadata.json")
-    with open(metadata_path, "w") as f:
-        json.dump(metadata, f, indent=2)
-
-    return case_dir
-
-
-def save_case_metadata(case_id, predictions, targets, image_id, case_dir):
-    """Save metadata for a single prediction case as JSON with detailed info"""
-    metadata = {
-        "case_id": case_id,
-        "patient_id": str(image_id),
-        "ground_truth": {
-            "boxes": (
-                targets["boxes"].tolist()
-                if isinstance(targets["boxes"], np.ndarray)
-                else targets["boxes"]
-            ),
-            "labels": (
-                targets["labels"].tolist()
-                if isinstance(targets["labels"], np.ndarray)
-                else targets["labels"]
-            ),
-            "num_objects": (
-                int(len(targets["labels"])) if targets["labels"].shape[0] > 0 else 0
             ),
             "class_names": (
                 [config.CLASS_NAMES[int(l) - 1] for l in targets["labels"].tolist()]
@@ -239,82 +160,50 @@ def save_case_metadata(case_id, predictions, targets, image_id, case_dir):
                 if predictions["labels"].shape[0] > 0
                 else []
             ),
-            "num_detections": (
-                int(len(predictions["labels"]))
-                if predictions["labels"].shape[0] > 0
-                else 0
-            ),
         },
     }
 
-    metadata_path = os.path.join(case_dir, "metadata.json")
+    metadata_path = os.path.join(metadata_dir, f"{image_id}.json")
     with open(metadata_path, "w") as f:
         json.dump(metadata, f, indent=2)
 
 
 def save_case_visualization(
-    case_id, image, predictions, targets, case_dir, dataset_dir
+    image_id, predictions, targets, case_dir, dataset_dir
 ):
-    """Save visualization image for a single case"""
-    img_path = os.path.join(dataset_dir, f"{case_id}.png")
+    """Save visualization image for a single case - side-by-side GT (left) and Pred (right)"""
+    img_path = os.path.join(dataset_dir, f"{image_id}.png")
+    img_original = cv2.imread(img_path)
 
-    if not os.path.exists(img_path):
-        # Try alternative naming
-        img_path = os.path.join(dataset_dir, f"case_{case_id}.png")
+    # Create two copies - one for GT, one for Predictions
+    img_gt = img_original.copy()
+    img_pred = img_original.copy()
 
-    if os.path.exists(img_path):
-        image = cv2.imread(img_path)
-        h, w = image.shape[:2]
-    else:
-        # Use provided image or create blank canvas if needed
-        h, w = 1024, 1024
-        if image is not None:
-            h, w = image.shape[:2]
-        else:
-            image = np.ones((h, w, 3), dtype=np.uint8) * 128
-
-    # Draw ground truth boxes in blue
-    img_with_boxes = image.copy()
+    # Draw ground truth boxes in blue on left image
     for box, label in zip(targets["boxes"], targets["labels"]):
-        x_min, y_min, x_max, y_max = box
-        x_min, y_min = max(0, int(x_min)), max(0, int(y_min))
-        x_max, y_max = min(w, int(x_max)), min(h, int(y_max))
-        cv2.rectangle(
-            img_with_boxes, (x_min, y_min), (x_max, y_max), (255, 0, 0), 2
-        )  # Blue
-        text = (
-            config.CLASS_NAMES[int(label) - 1]
-            if 1 <= int(label) <= len(config.CLASS_NAMES)
-            else f"Class {label}"
-        )
-        cv2.putText(
-            img_with_boxes,
-            f"GT: {text}",
-            (x_min, y_min - 20),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            (255, 0, 0),
-            1,
-        )
+        _draw_box_on_image(img_gt, box, label, (255, 0, 0), 20)
 
-    # Draw prediction boxes in green
+    # Draw prediction boxes in green on right image
     for box, score, label in zip(
         predictions["boxes"], predictions["scores"], predictions["labels"]
     ):
         x_min, y_min, x_max, y_max = box
-        x_min, y_min = max(0, int(x_min)), max(0, int(y_min))
-        x_max, y_max = min(w, int(x_max)), min(h, int(y_max))
-        cv2.rectangle(
-            img_with_boxes, (x_min, y_min), (x_max, y_max), (0, 255, 0), 2
-        )  # Green
+        h, w = img_pred.shape[:2]
+        x_min = max(0, int(x_min))
+        y_min = max(0, int(y_min))
+        x_max = min(w, int(x_max))
+        y_max = min(h, int(y_max))
+
+        cv2.rectangle(img_pred, (x_min, y_min), (x_max, y_max), (0, 255, 0), 2)
+
         text = (
             config.CLASS_NAMES[int(label) - 1]
             if 1 <= int(label) <= len(config.CLASS_NAMES)
             else f"Class {label}"
         )
         cv2.putText(
-            img_with_boxes,
-            f"Pred: {text} {score:.2f}",
+            img_pred,
+            f"{text} {score:.2f}",
             (x_min, y_min - 5),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.5,
@@ -322,13 +211,15 @@ def save_case_visualization(
             1,
         )
 
-    # Save as visualization
-    output_img_path = os.path.join(case_dir, f"{case_id}.png")
-    cv2.imwrite(output_img_path, img_with_boxes)
+    # Concatenate images horizontally
+    img_combined = cv2.hconcat([img_gt, img_pred])
+
+    output_img_path = os.path.join(case_dir, f"{image_id}.png")
+    cv2.imwrite(output_img_path, img_combined)
 
 
 def compute_metrics_per_class(
-    predictions_list, targets_list, class_names, iou_threshold=0.5
+    predictions_list, targets_list, class_names, iou_threshold
 ):
     """Compute per-class metrics"""
     num_classes = len(class_names)
@@ -381,6 +272,99 @@ def compute_metrics_per_class(
     return metrics_per_class
 
 
+def compute_ap(predictions_list, targets_list, class_id, iou_threshold):
+    """
+    Compute Average Precision (AP) for a specific class
+    """
+    # Collect all predictions and ground truths for this class
+    all_pred_scores = []
+    all_pred_matched = []
+    all_gt_count = 0
+
+    for predictions, targets in zip(predictions_list, targets_list):
+        pred_boxes = predictions["boxes"]
+        pred_labels = predictions["labels"]
+        pred_scores = predictions["scores"]
+        gt_boxes = targets["boxes"]
+        gt_labels = targets["labels"]
+
+        # Count ground truth objects for this class
+        for gt_label in gt_labels:
+            if gt_label == class_id:
+                all_gt_count += 1
+
+        # Match predictions
+        tp_idx, fp_idx, fn_idx = match_predictions(
+            pred_boxes, pred_labels, pred_scores, gt_boxes, gt_labels, iou_threshold
+        )
+
+        # Record predictions for this class
+        for idx in range(len(pred_labels)):
+            if pred_labels[idx] == class_id:
+                is_tp = idx in tp_idx
+                all_pred_scores.append(pred_scores[idx])
+                all_pred_matched.append(is_tp)
+
+    if all_gt_count == 0:
+        return 0.0
+
+    if len(all_pred_scores) == 0:
+        return 0.0
+
+    # Sort by scores in descending order
+    sorted_indices = np.argsort(-np.array(all_pred_scores))
+    all_pred_matched = np.array(all_pred_matched)[sorted_indices]
+
+    # Compute cumulative TP and FP
+    tp_cumsum = np.cumsum(all_pred_matched)
+    fp_cumsum = np.cumsum(1 - all_pred_matched)
+
+    # Compute precision and recall
+    precision = tp_cumsum / (tp_cumsum + fp_cumsum)
+    recall = tp_cumsum / all_gt_count
+
+    # Compute AP (area under PR curve)
+    ap = 0.0
+    for i in range(len(precision)):
+        if i == 0 or recall[i] != recall[i - 1]:
+            ap += precision[i] * (recall[i] - (recall[i - 1] if i > 0 else 0))
+
+    return ap
+
+
+def compute_map(predictions_list, targets_list, class_names, iou_threshold):
+    """
+    Compute mean Average Precision (mAP) across all classes
+    """
+    num_classes = len(class_names)
+    aps = {}
+
+    for class_id in range(1, num_classes + 1):
+        ap = compute_ap(predictions_list, targets_list, class_id, iou_threshold)
+        aps[class_id] = {
+            "class_name": class_names[class_id - 1],
+            "ap": float(ap),
+        }
+
+    # Calculate mean AP
+    mean_ap = np.mean([ap["ap"] for ap in aps.values()])
+
+    return mean_ap, aps
+
+
+def save_map_metrics(mean_ap, aps, metrics_dir):
+    """
+    Save mAP metrics to JSON file
+    """
+    map_summary = {
+        "map": float(mean_ap),
+        "per_class_ap": aps,
+    }
+    map_json_path = os.path.join(metrics_dir, "map_metrics.json")
+    with open(map_json_path, "w") as f:
+        json.dump(map_summary, f, indent=2)
+
+
 def save_metrics_summary(metrics_per_class, metrics_dir):
     summary = {
         "overall": {
@@ -414,75 +398,26 @@ def save_metrics_summary(metrics_per_class, metrics_dir):
     with open(summary_path, "w") as f:
         json.dump(summary, f, indent=2)
 
-    return summary
-
-
-def save_metrics_table(metrics_per_class, metrics_dir):
-    csv_path = os.path.join(metrics_dir, "metrics_table.csv")
-
-    with open(csv_path, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(
-            ["Class ID", "Class Name", "TP", "FP", "FN", "Precision", "Recall", "F1"]
-        )
-
-        for class_id in sorted(metrics_per_class.keys()):
-            m = metrics_per_class[class_id]
-            writer.writerow(
-                [
-                    class_id,
-                    m["class_name"],
-                    m["tp"],
-                    m["fp"],
-                    m["fn"],
-                    f"{m['precision']:.4f}",
-                    f"{m['recall']:.4f}",
-                    f"{m['f1']:.4f}",
-                ]
-            )
-
-
-def save_per_class_metrics(metrics_per_class, metrics_dir):
-    csv_path = os.path.join(metrics_dir, "per_class_metrics.csv")
-
-    with open(csv_path, "w", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow(
-            ["Class ID", "Class Name", "TP", "FP", "FN", "Precision", "Recall", "F1"]
-        )
-
-        for class_id in sorted(metrics_per_class.keys()):
-            m = metrics_per_class[class_id]
-            writer.writerow(
-                [
-                    class_id,
-                    m["class_name"],
-                    m["tp"],
-                    m["fp"],
-                    m["fn"],
-                    f"{m['precision']:.4f}",
-                    f"{m['recall']:.4f}",
-                    f"{m['f1']:.4f}",
-                ]
-            )
-
 
 def save_confusion_matrix_csv(cm, class_names, metrics_dir):
     csv_path = os.path.join(metrics_dir, "confusion_matrix.csv")
-
     labels = ["Background"] + class_names
     df = pd.DataFrame(cm, index=labels, columns=labels)
     df.to_csv(csv_path)
 
 
 def save_confusion_matrix_png(cm, class_names, metrics_dir):
-    """Save confusion_matrix.png"""
     _, ax = plt.subplots(figsize=(14, 12))
     labels = ["Background"] + class_names
+    
+    # Create custom annotations - only show non-zero values
+    annot_array = cm.astype(str)
+    annot_array[cm == 0] = ""
+    
     sns.heatmap(
         cm,
-        annot=True,
-        fmt="d",
+        annot=annot_array,
+        fmt="",
         cmap="Blues",
         xticklabels=labels,
         yticklabels=labels,
@@ -491,7 +426,6 @@ def save_confusion_matrix_png(cm, class_names, metrics_dir):
     )
     ax.set_xlabel("Predicted")
     ax.set_ylabel("Ground Truth")
-    ax.set_title("Confusion Matrix")
     plt.tight_layout()
 
     png_path = os.path.join(metrics_dir, "confusion_matrix.png")
@@ -502,61 +436,49 @@ def save_confusion_matrix_png(cm, class_names, metrics_dir):
 def evaluate(
     predictions_list,
     targets_list,
-    eval_base_dir,
-    cases_dir,
+    images_dir,
+    metadatas_dir,
     metrics_dir,
     image_ids=None,
-    df_test=None,
     dataset_dir=None,
+    iou_threshold=None,
 ):
     logger = get_logger()
+
+    # Use provided iou_threshold or fallback to config default
+    if iou_threshold is None:
+        iou_threshold = config.IOU_THRESHOLD
 
     # Use fallback for image_ids if not provided
     if image_ids is None:
         image_ids = list(range(len(predictions_list)))
 
-    # Use config dataset_dir if not provided
-    if dataset_dir is None:
-        dataset_dir = config.DATASET_DIR
-
-    logger.info(f"Saving {len(predictions_list)} cases...")
+    logger.info(f"Saving {len(predictions_list)} visualizations and metadatas...")
 
     # Save per-case visualizations and metadata
-    for case_id, (predictions, targets, image_id) in enumerate(
-        zip(predictions_list, targets_list, image_ids)
+    for predictions, targets, image_id in zip(
+        predictions_list, targets_list, image_ids
     ):
-        patient_id = str(image_id)
-        case_subdir = os.path.join(cases_dir, patient_id)
-        os.makedirs(case_subdir, exist_ok=True)
-
         # Save metadata
-        save_case_metadata(patient_id, predictions, targets, image_id, case_subdir)
+        save_case_metadata(image_id, predictions, targets, metadatas_dir)
 
-        # Save visualization
-        save_case_visualization(
-            patient_id, None, predictions, targets, case_subdir, dataset_dir
-        )
+        # Save visualization (composite image: GT | Pred)
+        save_case_visualization(image_id, predictions, targets, images_dir, dataset_dir)
 
-    logger.info(f"✓ Saved {len(predictions_list)} cases")
+    logger.info(f"Saved {len(predictions_list)} visualizations and metadatas")
 
     # Compute and save metrics
     logger.info("Computing per-class metrics...")
     metrics_per_class = compute_metrics_per_class(
-        predictions_list, targets_list, config.CLASS_NAMES
+        predictions_list, targets_list, config.CLASS_NAMES, iou_threshold
     )
 
     logger.info("Saving metrics_summary.json...")
-    summary = save_metrics_summary(metrics_per_class, metrics_dir)
-
-    logger.info("Saving metrics_table.csv...")
-    save_metrics_table(metrics_per_class, metrics_dir)
-
-    logger.info("Saving per_class_metrics.csv...")
-    save_per_class_metrics(metrics_per_class, metrics_dir)
+    save_metrics_summary(metrics_per_class, metrics_dir)
 
     logger.info("Building confusion matrix...")
     cm = build_confusion_matrix(
-        predictions_list, targets_list, config.CLASS_NAMES, iou_threshold=0.5
+        predictions_list, targets_list, config.CLASS_NAMES, iou_threshold
     )
 
     logger.info("Saving confusion_matrix.csv...")
@@ -565,6 +487,14 @@ def evaluate(
     logger.info("Saving confusion_matrix.png...")
     save_confusion_matrix_png(cm, config.CLASS_NAMES, metrics_dir)
 
-    logger.info(f"✓ All metrics saved to {metrics_dir}")
+    # Compute and save mAP
+    logger.info(f"Computing mAP (IOU threshold: {iou_threshold})...")
+    mean_ap, aps = compute_map(
+        predictions_list, targets_list, config.CLASS_NAMES, iou_threshold
+    )
 
-    return summary
+    logger.info("Saving mAP metrics...")
+    save_map_metrics(mean_ap, aps, metrics_dir)
+    logger.info(f"mAP: {mean_ap:.4f}")
+
+    logger.info(f"All metrics and visualizations saved to {os.path.dirname(images_dir)}")

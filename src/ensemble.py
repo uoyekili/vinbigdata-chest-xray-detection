@@ -1,6 +1,8 @@
 import numpy as np
 from ensemble_boxes import weighted_boxes_fusion as wbf_lib
 
+from src import config
+
 
 def weighted_boxes_fusion(
     boxes_list, scores_list, labels_list, iou_thr, skip_box_thr, weights=None
@@ -15,14 +17,21 @@ def weighted_boxes_fusion(
     scores_for_fusion = []
     labels_for_fusion = []
 
+    # Normalize boxes to [0, 1] range for WBF
+    image_size = config.IMAGE_SIZE
+
     for boxes, scores, labels in zip(boxes_list, scores_list, labels_list):
         if len(boxes) == 0:
             boxes_for_fusion.append([])
             scores_for_fusion.append([])
             labels_for_fusion.append([])
         else:
-            boxes_converted = [[x1, y1, x2, y2] for x1, y1, x2, y2 in boxes]
-            boxes_for_fusion.append(boxes_converted)
+            # Normalize boxes from pixel coordinates to [0, 1]
+            boxes_normalized = [
+                [x1 / image_size, y1 / image_size, x2 / image_size, y2 / image_size]
+                for x1, y1, x2, y2 in boxes
+            ]
+            boxes_for_fusion.append(boxes_normalized)
             scores_for_fusion.append(
                 scores.tolist() if isinstance(scores, np.ndarray) else list(scores)
             )
@@ -43,8 +52,14 @@ def weighted_boxes_fusion(
         if len(fused[0]) == 0:
             return np.zeros((0, 4)), np.array([]), np.array([])
 
+        # Denormalize boxes back to pixel coordinates
+        fused_boxes_denorm = [
+            [x1 * image_size, y1 * image_size, x2 * image_size, y2 * image_size]
+            for x1, y1, x2, y2 in fused[0]
+        ]
+
         return (
-            np.array(fused[0]),
+            np.array(fused_boxes_denorm),
             np.array(fused[1]),
             np.array(fused[2], dtype=np.int64),
         )
